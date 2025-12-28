@@ -8,103 +8,77 @@ const __dirname = path.dirname(__filename);
 const YTDLP = path.resolve(__dirname, "../../bin/yt-dlp.exe");
 
 export function streamYouTube(url) {
-  const ytdlp = spawn(
-    YTDLP,
-    [
-      "-f", "bestaudio[ext=webm]/bestaudio",  // ⚡ Prefer WebM (faster start)
-      "-o", "-",
-      "--no-playlist",
-      "--user-agent", "Mozilla/5.0",
-      "--buffer-size", "16K",  // ⚡ Smaller buffer = faster start
-      url
-    ],
-    { windowsHide: true }
-  );
+  // ⚡ Spawn yt-dlp with optimized settings
+  const ytdlp = spawn(YTDLP, [
+    url,
+    "-f", "bestaudio[ext=webm]/bestaudio/best",  // ⚡ Prefer WebM (faster start)
+    "-o", "-",
+    "--quiet",
+    "--no-warnings",
+    "--no-playlist",
+    "--buffer-size", "16K",  // ⚡ Smaller buffer = faster start
+    "--extractor-retries", "3",
+    "--no-check-certificates"
+  ], {
+    windowsHide: true
+  });
 
-  const ffmpeg = spawn(
-    "ffmpeg",
-    [
-      "-i", "pipe:0",
-      "-analyzeduration", "0",  // ⚡ Don't analyze, start immediately
-      "-probesize", "32",       // ⚡ Minimal probing
-      "-ar", "48000",
-      "-ac", "2",
-      "-f", "s16le",
-      "-bufsize", "64k",        // ⚡ Small buffer
-      "pipe:1"
-    ],
-    { windowsHide: true }
-  );
-
-  // ✅ Create a passthrough stream we can destroy
+  // ✅ Create PassThrough so we can properly destroy it
   const output = new PassThrough();
 
-  ytdlp.stdout.pipe(ffmpeg.stdin);
-  ffmpeg.stdout.pipe(output);
+  // Pipe yt-dlp output to our PassThrough
+  ytdlp.stdout.pipe(output);
 
-  // ✅ Suppress EPIPE errors on pipes
+  // ✅ Suppress pipe errors
   ytdlp.stdout.on("error", () => {});
-  ffmpeg.stdin.on("error", () => {});
-  ffmpeg.stdout.on("error", () => {});
 
   // ✅ Handle process errors
-  ytdlp.on("error", err => {
-    console.error("❌ yt-dlp error:", err.message);
+  ytdlp.on("error", (err) => {
+    console.error("❌ Failed to start yt-dlp:", err.message);
+    output.destroy();
   });
 
-  ffmpeg.on("error", err => {
-    console.error("❌ ffmpeg error:", err.message);
-  });
-
-  // ✅ Suppress stderr noise (only log real errors)
-  ytdlp.stderr.on("data", data => {
+  // ✅ Handle stderr (only show real errors)
+  ytdlp.stderr.on("data", (data) => {
     const msg = data.toString();
     if (msg.includes("ERROR")) {
-      console.error("yt-dlp:", msg);
+      console.error("yt-dlp error:", msg);
     }
   });
 
-  ffmpeg.stderr.on("data", data => {
-    const msg = data.toString();
-    if (msg.includes("Error") && !msg.includes("time=")) {
-      console.error("ffmpeg:", msg);
+  ytdlp.on("close", (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`❌ yt-dlp exited with code ${code}`);
     }
   });
 
   let isCleanedUp = false;
 
-  // ✅ Cleanup function with proper pipe handling
+  // ✅ Cleanup function
   function cleanup() {
     if (isCleanedUp) return;
     isCleanedUp = true;
 
-    // 1️⃣ First unpipe everything to prevent EPIPE
     try {
-      ytdlp.stdout.unpipe(ffmpeg.stdin);
-      ffmpeg.stdout.unpipe(output);
+      ytdlp.stdout.unpipe(output);
     } catch (e) {
       // Ignore unpipe errors
     }
 
-    // 2️⃣ Then kill the processes
     try {
-      if (!ytdlp.killed) ytdlp.kill("SIGKILL");
-    } catch (e) {
-      // Process might already be dead
-    }
-
-    try {
-      if (!ffmpeg.killed) ffmpeg.kill("SIGKILL");
+      if (!ytdlp.killed) {
+        ytdlp.kill("SIGKILL");
+      }
     } catch (e) {
       // Process might already be dead
     }
   }
 
-  // ✅ When output stream ends/closes, cleanup everything
+  // ✅ Cleanup on stream end
   output.on("close", cleanup);
   output.on("error", cleanup);
 
-  // ✅ Override destroy to cleanup properly
+  // ✅ Override destroy for proper cleanup
   const originalDestroy = output.destroy.bind(output);
   output.destroy = function(error) {
     cleanup();

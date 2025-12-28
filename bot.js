@@ -25,8 +25,7 @@ import { searchYouTube } from "./music/search.js";
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.DirectMessages
+    GatewayIntentBits.GuildVoiceStates
   ]
 });
 
@@ -110,7 +109,7 @@ client.once(Events.ClientReady, async () => {
     { body: commands }
   );
 
-  // ✅ Pass Discord client to listener for DM functionality
+  // ✅ Pass Discord client to listener
   setDiscordClient(client);
 
   console.log("🚀 Ok Garmin is online with full queue & volume support!");
@@ -141,7 +140,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!vc) {
       return interaction.reply({
         content: "❌ You need to be in a voice channel first!",
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -149,9 +148,33 @@ client.on(Events.InteractionCreate, async interaction => {
     if (existingConnection && summonedBy.has(guildId)) {
       return interaction.reply({
         content: `⚠️ Already listening to <@${summonedBy.get(guildId)}>! They need to disconnect first.`,
-        flags: 64
+        ephemeral: true
       });
     }
+
+    // ✅ Reply with command list immediately
+    const commandHelp = `👂 **Ok Garmin is now listening to your voice!**
+
+🎵 **Voice Commands:**
+• "ok garmin play [song name]" - Add song to queue
+• "ok garmin skip" - Skip to next song
+• "ok garmin pause" - Pause current song
+• "ok garmin resume" - Resume playback
+• "ok garmin stop" - Stop music (keeps queue)
+• "ok garmin what's next" or "ok garmin q" - Show queue
+• "ok garmin clear queue" - Clear all songs
+• "ok garmin volume up/down" - Adjust volume
+• "ok garmin volume [0-100]" - Set specific volume
+• "ok garmin disconnect" - Leave voice channel
+
+💡 **Tips:**
+- Only you can control the bot while it's active
+- Music keeps playing while checking queue`;
+
+    await interaction.reply({
+      content: commandHelp,
+      ephemeral: true
+    });
 
     const connection = joinVoiceChannel({
       channelId: vc.id,
@@ -195,41 +218,6 @@ client.on(Events.InteractionCreate, async interaction => {
     setTimeout(() => {
       listen(connection, interaction.user.id, player, guildId);
     }, 500);
-
-    // ✅ Send command list via DM
-    try {
-      const commandHelp = `👂 **Ok Garmin is now listening to your voice!**
-
-🎵 **Voice Commands:**
-• "ok garmin play [song name]" - Add song to queue
-• "ok garmin skip" - Skip to next song
-• "ok garmin pause" - Pause current song
-• "ok garmin resume" - Resume playback
-• "ok garmin stop" - Stop music (keeps queue)
-• "ok garmin what's next" - Show queue
-• "ok garmin clear queue" - Clear all songs
-• "ok garmin volume up/down" - Adjust volume
-• "ok garmin volume [0-100]" - Set specific volume
-• "ok garmin disconnect" - Leave voice channel
-
-💡 **Tips:**
-- Queue messages will be sent to your DMs
-- Only you can control the bot while it's active
-- Music keeps playing while checking queue`;
-
-      await interaction.user.send(commandHelp);
-      
-      await interaction.reply({
-        content: `👂 Listening to your voice commands! Check your DMs for the command list.`,
-        flags: 64
-      });
-    } catch (error) {
-      console.error("Failed to send DM:", error.message);
-      await interaction.reply({
-        content: `👂 Listening to your voice commands, <@${interaction.user.id}>!\nTry: "ok garmin play [song name]"`,
-        flags: 64
-      });
-    }
   }
 
   // ========== /okgarmindisconnect ==========
@@ -239,7 +227,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!connection) {
       return interaction.reply({
         content: "❌ I'm not in a voice channel!",
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -247,7 +235,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can disconnect me!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -264,7 +252,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: "👋 Disconnected and cleared queue!",
-      flags: 64
+      ephemeral: true
     });
   }
 
@@ -275,7 +263,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!connection) {
       return interaction.reply({
         content: "❌ I'm not in a voice channel! Use `/okgarmin` first.",
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -283,13 +271,13 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can control the music!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
     const songQuery = interaction.options.getString("song");
     
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply({ ephemeral: true });
 
     const video = await searchYouTube(songQuery);
 
@@ -326,7 +314,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!connection) {
       return interaction.reply({
         content: "❌ I'm not in a voice channel!",
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -334,26 +322,30 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can control the music!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
     const player = players.get(guildId);
     const queue = getQueue(guildId);
 
-    player.stop(true);
-
-    if (playNextInQueue(player, guildId)) {
-      await interaction.reply({
-        content: "⏭️ Skipped to next song!",
-        flags: 64
-      });
-    } else {
-      await interaction.reply({
+    // ✅ Reply first before doing anything
+    const nextSong = queue.peek();
+    if (!nextSong) {
+      return interaction.reply({
         content: "⏭️ Skipped! Queue is empty.",
-        flags: 64
+        ephemeral: true
       });
     }
+
+    await interaction.reply({
+      content: `⏭️ Skipping to: **${nextSong.title}**`,
+      ephemeral: true
+    });
+
+    // Then skip
+    player.stop(true);
+    playNextInQueue(player, guildId);
   }
 
   // ========== /okgarminpause ==========
@@ -363,7 +355,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!player) {
       return interaction.reply({
         content: "❌ Nothing is playing!",
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -371,7 +363,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can control the music!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -381,7 +373,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: "⏸️ Paused!",
-      flags: 64
+      ephemeral: true
     });
   }
 
@@ -392,7 +384,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (!player) {
       return interaction.reply({
         content: "❌ Nothing is paused!",
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -400,7 +392,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can control the music!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -410,7 +402,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: "▶️ Resumed!",
-      flags: 64
+      ephemeral: true
     });
   }
 
@@ -422,7 +414,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (songs.length === 0) {
       return interaction.reply({
         content: "🔭 Queue is empty!",
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -434,7 +426,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: `📋 **Queue (${songs.length} song${songs.length > 1 ? 's' : ''}):**\n${queueText}${remaining}`,
-      flags: 64
+      ephemeral: true
     });
   }
 
@@ -444,7 +436,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can control the queue!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -453,7 +445,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: "🗑️ Queue cleared!",
-      flags: 64
+      ephemeral: true
     });
   }
 
@@ -463,7 +455,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can control the volume!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -478,7 +470,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: `🔊 Volume set to ${level}%`,
-      flags: 64
+      ephemeral: true
     });
   }
 
@@ -488,7 +480,7 @@ client.on(Events.InteractionCreate, async interaction => {
     if (summonerId && summonerId !== interaction.user.id) {
       return interaction.reply({
         content: `⚠️ Only <@${summonerId}> can control the music!`,
-        flags: 64
+        ephemeral: true
       });
     }
 
@@ -499,7 +491,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
     await interaction.reply({
       content: "⏹️ Stopped! (Queue preserved)",
-      flags: 64
+      ephemeral: true
     });
   }
 });

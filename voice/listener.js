@@ -182,14 +182,23 @@ export function listen(connection, userId, player, guildId) {
 
     console.log(`🗣️ [${guildId}] Heard:`, text);
 
-    // ✅ Helper to send DM to user
-    async function sendUserDM(message) {
+    // ✅ Helper to send message to channel
+    async function sendChannelMessage(message) {
       if (discordClient) {
         try {
-          const user = await discordClient.users.fetch(userId);
-          await user.send(message);
+          const guild = await discordClient.guilds.fetch(guildId);
+          const member = await guild.members.fetch(userId);
+          const voiceChannel = member.voice.channel;
+          
+          if (voiceChannel) {
+            // Try to send to the voice channel's text channel or any text channel
+            const textChannel = guild.channels.cache.find(ch => ch.isTextBased() && ch.permissionsFor(guild.members.me).has('SendMessages'));
+            if (textChannel) {
+              await textChannel.send(message);
+            }
+          }
         } catch (error) {
-          console.error(`❌ [${guildId}] Failed to send DM:`, error.message);
+          console.error(`❌ [${guildId}] Failed to send message:`, error.message);
         }
       }
     }
@@ -387,9 +396,9 @@ export function listen(connection, userId, player, guildId) {
       const queue = getQueue(guildId);
       const songs = queue.list();
       
-      // ✅ Send queue as DM without interrupting music
+      // ✅ Send queue to channel without interrupting music
       if (songs.length === 0) {
-        await sendUserDM("📋 **Queue is empty!**");
+        await sendChannelMessage("📋 **Queue is empty!**");
       } else {
         const queueText = songs.slice(0, 10).map((song, i) => 
           `${i + 1}. ${song.title}`
@@ -397,7 +406,7 @@ export function listen(connection, userId, player, guildId) {
         
         const remaining = songs.length > 10 ? `\n... and ${songs.length - 10} more` : "";
         
-        await sendUserDM(`📋 **Queue (${songs.length} song${songs.length > 1 ? 's' : ''}):**\n${queueText}${remaining}`);
+        await sendChannelMessage(`📋 **Queue (${songs.length} song${songs.length > 1 ? 's' : ''}):**\n${queueText}${remaining}`);
       }
 
       // ✅ Continue listening immediately without touching the player

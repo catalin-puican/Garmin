@@ -1,4 +1,7 @@
 import "dotenv/config";
+process.on("unhandledRejection", err => {
+  console.error("Unhandled promise rejection:", err);
+});
 
 import {
   Client,

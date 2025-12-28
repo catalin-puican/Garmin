@@ -10,14 +10,14 @@ const __dirname = path.dirname(__filename);
 const YTDLP = path.resolve(__dirname, "../../bin/yt-dlp.exe");
 
 // ⚡ YouTube Data API v3 (if available)
-const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
-const YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search";
+//const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
+//const YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search";
 
 // ⚡ Cache search results (cleared every hour)
 const searchCache = new Map();
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
-async function searchWithAPI(query) {
+/*async function searchWithAPI(query) {
   if (!YOUTUBE_API_KEY) {
     console.log("⚠️ No YouTube API key found, using yt-dlp");
     return null;
@@ -61,25 +61,32 @@ async function searchWithAPI(query) {
     console.error("❌ YouTube API error:", e.message);
     return null;
   }
-}
+}*/
 
 async function searchWithYtDlp(query) {
   try {
     const { stdout } = await execFileAsync(
       YTDLP,
       [
-        `ytsearch1:${query}`,
-        "--get-title",
-        "--get-id",
-        "--no-playlist",
-        "--user-agent",
+        `ytsearch1:${query}`,    // Search and return 1 result
+        "--flat-playlist",       // ⚡ The most important flag: treats search results as a list, doesn't verify video availability (faster/safer)
+        "--print",               // Tell yt-dlp to output specific data
+        "%(title)s\n%(id)s",     // Format: Line 1 = Title, Line 2 = Video ID
+        "--no-warnings",         // Prevent warning messages from messing up the parsing
+        "--user-agent",          // Helps avoid being flagged as a bot
         "Mozilla/5.0"
       ],
-      { windowsHide: true }
+      { windowsHide: true } // Keeps the command prompt window hidden on Windows
     );
 
-    const [title, id] = stdout.trim().split("\n");
-    if (!title || !id) return null;
+    // Parse the output
+    const output = stdout.trim().split("\n");
+    
+    // Safety check: ensure we got both lines
+    if (output.length < 2) return null;
+
+    const title = output[0];
+    const id = output[1];
 
     console.log("🎵 yt-dlp found:", title);
 
@@ -108,9 +115,9 @@ export async function searchYouTube(query) {
   console.log("🔍 Searching for:", query);
 
   // ⚡ Try API first (fast), fallback to yt-dlp (reliable)
-  let result = await searchWithAPI(query);
+  //let result = await searchWithAPI(query);
   
-  if (!result) {
+ /* if (!result) {
     console.log("⚠️ API failed, falling back to yt-dlp...");
     result = await searchWithYtDlp(query);
   }
@@ -118,9 +125,15 @@ export async function searchYouTube(query) {
   if (!result) {
     console.log("❌ No results found anywhere");
     return null;
+  }*/
+
+  const result = await searchWithYtDlp(query);
+  if (!result) {
+    console.log("❌ No results found");
+    return null;
   }
 
-  // ⚡ Store in cache
+      // ⚡ Store in cache
   searchCache.set(normalizedQuery, {
     data: result,
     timestamp: Date.now()

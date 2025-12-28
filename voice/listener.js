@@ -25,20 +25,13 @@ const listeningActive = new Map();
 // ✅ Track idle listeners to prevent duplicate auto-play
 const idleListeners = new Map();
 
-// ✅ Store Discord client reference for sending messages
-let discordClient = null;
-
-function setDiscordClient(client) {
-  discordClient = client;
-}
-
 // ✅ Helper to play next song in queue
 async function playNextInQueue(player, guildId) {
   const queue = getQueue(guildId);
   const nextSong = queue.next();
 
   if (!nextSong) {
-    console.log(`🔭 [${guildId}] Queue empty`);
+    console.log(`📭 [${guildId}] Queue empty`);
     return false;
   }
 
@@ -182,27 +175,6 @@ export function listen(connection, userId, player, guildId) {
 
     console.log(`🗣️ [${guildId}] Heard:`, text);
 
-    // ✅ Helper to send message to channel
-    async function sendChannelMessage(message) {
-      if (discordClient) {
-        try {
-          const guild = await discordClient.guilds.fetch(guildId);
-          const member = await guild.members.fetch(userId);
-          const voiceChannel = member.voice.channel;
-          
-          if (voiceChannel) {
-            // Try to send to the voice channel's text channel or any text channel
-            const textChannel = guild.channels.cache.find(ch => ch.isTextBased() && ch.permissionsFor(guild.members.me).has('SendMessages'));
-            if (textChannel) {
-              await textChannel.send(message);
-            }
-          }
-        } catch (error) {
-          console.error(`❌ [${guildId}] Failed to send message:`, error.message);
-        }
-      }
-    }
-
     const intent = parseIntent(text);
 
     if (intent?.type === "play") {
@@ -212,7 +184,6 @@ export function listen(connection, userId, player, guildId) {
         const notFoundTts = speak("I couldn't find that song");
         player.play(notFoundTts);
         
-        // ✅ Wait for TTS to finish before continuing to listen
         player.once(AudioPlayerStatus.Idle, () => {
           if (connection.state.status !== VoiceConnectionStatus.Destroyed && listeningActive.get(guildId)) {
             listen(connection, userId, player, guildId);
@@ -247,6 +218,10 @@ export function listen(connection, userId, player, guildId) {
         
         idleListeners.set(guildId, newListener);
         player.once(AudioPlayerStatus.Idle, newListener);
+      } else {
+        // Song added to queue, just log it
+        const position = queue.size();
+        console.log(`📋 [${guildId}] Position in queue: ${position}`);
       }
 
       if (connection.state.status !== VoiceConnectionStatus.Destroyed && listeningActive.get(guildId)) {
@@ -278,10 +253,8 @@ export function listen(connection, userId, player, guildId) {
         idleListeners.delete(guildId);
       }
       
-      // ✅ Stop current song
       player.stop(true);
       
-      // ✅ Check what's next in queue
       const nextSong = queue.peek();
       
       if (!nextSong) {
@@ -296,17 +269,8 @@ export function listen(connection, userId, player, guildId) {
         return;
       }
 
-      // ✅ Announce the next song with its title
-      const ttsResource = speak(`Playing next song ${nextSong.title}`);
-      player.play(ttsResource);
-      
-      // ✅ After TTS, play the actual song
-      player.once(AudioPlayerStatus.Idle, () => {
-        if (listeningActive.get(guildId)) {
-          playNextInQueue(player, guildId);
-        }
-      });
-
+      // Play next song
+      playNextInQueue(player, guildId);
       console.log(`⏭️ [${guildId}] Skipped to next song`);
 
       if (connection.state.status !== VoiceConnectionStatus.Destroyed && listeningActive.get(guildId)) {
@@ -346,7 +310,6 @@ export function listen(connection, userId, player, guildId) {
       const newVol = Math.min(100, queue.getVolume() + 10);
       queue.setVolume(newVol);
       
-      // Update current playing volume
       if (player.state.resource?.volume) {
         player.state.resource.volume.setVolume(newVol / 100);
       }
@@ -396,23 +359,30 @@ export function listen(connection, userId, player, guildId) {
       const queue = getQueue(guildId);
       const songs = queue.list();
       
-      // ✅ Send queue to channel without interrupting music
+      // ✅ Just speak the count and log to console
       if (songs.length === 0) {
-        await sendChannelMessage("📋 **Queue is empty!**");
+        const ttsResource = speak("Queue is empty");
+        player.play(ttsResource);
       } else {
-        const queueText = songs.slice(0, 10).map((song, i) => 
-          `${i + 1}. ${song.title}`
-        ).join("\n");
+        const count = songs.length;
+        const ttsResource = speak(`${count} song${count > 1 ? 's' : ''} in queue`);
+        player.play(ttsResource);
         
-        const remaining = songs.length > 10 ? `\n... and ${songs.length - 10} more` : "";
-        
-        await sendChannelMessage(`📋 **Queue (${songs.length} song${songs.length > 1 ? 's' : ''}):**\n${queueText}${remaining}`);
+        // Log to console
+        console.log(`📋 [${guildId}] Queue:`);
+        songs.slice(0, 10).forEach((song, i) => {
+          console.log(`  ${i + 1}. ${song.title}`);
+        });
+        if (songs.length > 10) {
+          console.log(`  ... and ${songs.length - 10} more`);
+        }
       }
 
-      // ✅ Continue listening immediately without touching the player
-      if (connection.state.status !== VoiceConnectionStatus.Destroyed && listeningActive.get(guildId)) {
-        return listen(connection, userId, player, guildId);
-      }
+      player.once(AudioPlayerStatus.Idle, () => {
+        if (connection.state.status !== VoiceConnectionStatus.Destroyed && listeningActive.get(guildId)) {
+          listen(connection, userId, player, guildId);
+        }
+      });
       return;
     }
 
@@ -500,4 +470,4 @@ export function listen(connection, userId, player, guildId) {
 }
 
 // Export helper for manual queue operations
-export { playNextInQueue, setDiscordClient };
+export { playNextInQueue };

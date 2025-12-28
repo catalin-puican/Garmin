@@ -17,7 +17,7 @@ import {
   AudioPlayerStatus
 } from "@discordjs/voice";
 
-import { listen, stopListening, playNextInQueue, setDiscordClient } from "./voice/listener.js";
+import { listen, stopListening, playNextInQueue } from "./voice/listener.js";
 import { preloadCommonPhrases } from "./voice/tts.js";
 import { getQueue, clearQueue } from "./music/queue.js";
 import { searchYouTube } from "./music/search.js";
@@ -109,9 +109,6 @@ client.once(Events.ClientReady, async () => {
     { body: commands }
   );
 
-  // ✅ Pass Discord client to listener
-  setDiscordClient(client);
-
   console.log("🚀 Ok Garmin is online with full queue & volume support!");
   console.log("📋 Available commands:");
   console.log("   /okgarmin - Start listening");
@@ -152,27 +149,8 @@ client.on(Events.InteractionCreate, async interaction => {
       });
     }
 
-    // ✅ Reply with command list immediately
-    const commandHelp = `👂 **Ok Garmin is now listening to your voice!**
-
-🎵 **Voice Commands:**
-• "ok garmin play [song name]" - Add song to queue
-• "ok garmin skip" - Skip to next song
-• "ok garmin pause" - Pause current song
-• "ok garmin resume" - Resume playback
-• "ok garmin stop" - Stop music (keeps queue)
-• "ok garmin what's next" or "ok garmin q" - Show queue
-• "ok garmin clear queue" - Clear all songs
-• "ok garmin volume up/down" - Adjust volume
-• "ok garmin volume [0-100]" - Set specific volume
-• "ok garmin disconnect" - Leave voice channel
-
-💡 **Tips:**
-- Only you can control the bot while it's active
-- Music keeps playing while checking queue`;
-
     await interaction.reply({
-      content: commandHelp,
+      content: `👂 Listening to your voice commands, <@${interaction.user.id}>!\nTry: "ok garmin play [song name]"`,
       ephemeral: true
     });
 
@@ -329,9 +307,17 @@ client.on(Events.InteractionCreate, async interaction => {
     const player = players.get(guildId);
     const queue = getQueue(guildId);
 
-    // ✅ Reply first before doing anything
+    if (player.state.status === AudioPlayerStatus.Idle) {
+      return interaction.reply({
+        content: "❌ Nothing is playing!",
+        ephemeral: true
+      });
+    }
+
     const nextSong = queue.peek();
+    
     if (!nextSong) {
+      player.stop(true);
       return interaction.reply({
         content: "⏭️ Skipped! Queue is empty.",
         ephemeral: true
@@ -343,7 +329,6 @@ client.on(Events.InteractionCreate, async interaction => {
       ephemeral: true
     });
 
-    // Then skip
     player.stop(true);
     playNextInQueue(player, guildId);
   }
@@ -352,7 +337,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.commandName === "okgarminpause") {
     const player = players.get(guildId);
     
-    if (!player) {
+    if (!player || player.state.status === AudioPlayerStatus.Idle) {
       return interaction.reply({
         content: "❌ Nothing is playing!",
         ephemeral: true
@@ -381,7 +366,7 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.commandName === "okgarminresume") {
     const player = players.get(guildId);
     
-    if (!player) {
+    if (!player || player.state.status !== AudioPlayerStatus.Paused) {
       return interaction.reply({
         content: "❌ Nothing is paused!",
         ephemeral: true
@@ -413,7 +398,7 @@ client.on(Events.InteractionCreate, async interaction => {
     
     if (songs.length === 0) {
       return interaction.reply({
-        content: "🔭 Queue is empty!",
+        content: "📭 Queue is empty!",
         ephemeral: true
       });
     }
